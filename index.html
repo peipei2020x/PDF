@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>The Sanctuary Archive</title>
+<!-- PDF.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+</script>
+
+<style>
+    /* ========== SANCTUARY DESIGN SYSTEM ========== */
+    :root {
+        --bg-deep: #080706; 
+        --bg-warm: #14110f;
+        --accent: #c4a778;
+        --accent-dim: #8a7558;
+        --accent-glow: rgba(196, 167, 120, 0.15);
+        --text-main: #d0c8c0;
+        --text-sub: #7a726d;
+        --text-legal: #5c5550;
+
+        --book-height: 90vh;
+        --page-width: calc(var(--book-height) / 1.414);
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+
+    body, html {
+        margin: 0; padding: 0;
+        width: 100%; height: 100%;
+        background-color: var(--bg-deep);
+        color: var(--text-main);
+        font-family: "Yu Mincho", "Hiragino Mincho ProN", serif;
+        overflow: hidden;
+        cursor: default;
+    }
+
+    /* === 背景 === */
+    .ambient-bg {
+        position: fixed; inset: 0; z-index: 0;
+        background: radial-gradient(circle at 50% 50%, var(--bg-warm) 0%, var(--bg-deep) 80%);
+        animation: breathing 8s ease-in-out infinite;
+        pointer-events: none;
+    }
+    @keyframes breathing {
+        0%, 100% { opacity: 0.8; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.02); }
+    }
+
+    .fade-layer {
+        position: absolute; inset: 0;
+        transition: opacity 1.2s cubic-bezier(0.22, 1, 0.36, 1), filter 1.2s;
+        opacity: 0; pointer-events: none; z-index: 1;
+        display: flex; flex-direction: column;
+    }
+    .fade-layer.active {
+        opacity: 1; pointer-events: auto; z-index: 10;
+        filter: blur(0px);
+    }
+    .fade-layer.inactive {
+        filter: blur(10px);
+        transform: scale(0.98);
+    }
+
+    /* ========== 1. ENTRY ========== */
+    #view-entry {
+        justify-content: center; align-items: center;
+        text-align: center;
+    }
+    .entry-content {
+        position: relative; z-index: 2;
+        max-width: 680px; padding: 40px;
+        animation: slideUp 1.5s ease-out;
+    }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+    .app-title {
+        font-size: 3rem; letter-spacing: 0.25em; color: var(--accent);
+        margin-bottom: 1.5rem;
+        text-shadow: 0 0 25px var(--accent-glow);
+        font-weight: normal;
+    }
+    .librarian-msg {
+        font-size: 1rem; color: var(--text-sub); margin-bottom: 4rem;
+        line-height: 2.2; letter-spacing: 0.08em; font-style: italic;
+        border-top: 1px solid rgba(196, 167, 120, 0.1);
+        border-bottom: 1px solid rgba(196, 167, 120, 0.1);
+        padding: 30px 0;
+    }
+    .btn-quiet {
+        display: inline-block; padding: 18px 50px;
+        border: 1px solid rgba(196, 167, 120, 0.4);
+        color: var(--text-main); background: rgba(10,10,10,0.4);
+        font-family: serif; letter-spacing: 0.2em; font-size: 1rem;
+        transition: all 0.5s ease; cursor: pointer;
+        position: relative; overflow: hidden;
+    }
+    .btn-quiet:hover {
+        background: var(--accent-glow); border-color: var(--accent);
+        box-shadow: 0 0 40px var(--accent-glow); transform: translateY(-2px);
+    }
+    .sub-links {
+        margin-top: 60px; display: flex; justify-content: center; gap: 40px;
+        font-size: 0.8rem; letter-spacing: 0.1em;
+    }
+    .text-link {
+        color: var(--text-legal); cursor: pointer; position: relative;
+        transition: color 0.3s; text-decoration: none;
+        background: none; border: none; padding: 0; font-family: serif;
+    }
+    .text-link:hover { color: var(--accent-dim); }
+
+    /* ========== 2. SHELF (Modified) ========== */
+    #view-shelf {
+        padding-top: 80px; overflow-y: auto; scrollbar-width: none;
+    }
+    #view-shelf::-webkit-scrollbar { display: none; }
+
+    .shelf-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 60px 40px;
+        padding: 40px 80px;
+        max-width: 1600px; margin: 0 auto;
+    }
+    
+    .book-item {
+        position: relative; perspective: 1000px;
+        cursor: pointer; opacity: 0; animation: fadeUp 0.8s forwards;
+        border-radius: 4px;
+        transition: transform 0.3s, box-shadow 0.3s;
+        display: flex; flex-direction: column; align-items: center;
+    }
+    .book-item.selected { z-index: 10; }
+    .book-item.selected .book-spine {
+        transform: translateY(-12px) scale(1.05);
+        box-shadow: 0 0 0 2px var(--accent), 0 25px 50px rgba(0,0,0,0.7);
+        border-color: var(--accent);
+    }
+    
+    @keyframes fadeUp { to { opacity: 1; } }
+
+    .book-spine {
+        width: 100%; 
+        /* 固定アスペクト比を維持しつつ、中身はcontainで表示 */
+        aspect-ratio: 1/1.45; 
+        background: #1a1816; /* 余白部分の色 */
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.4s;
+        position: relative; overflow: hidden;
+        border: 1px solid rgba(255,255,255,0.05);
+        display: flex; justify-content: center; align-items: center;
+    }
+    .book-item:hover .book-spine {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+        border-color: var(--accent);
+    }
+    
+    .book-spine img {
+        width: 100%; height: 100%;
+        /* 画像を潰さず、枠内に収める */
+        object-fit: contain; 
+        opacity: 0; transition: opacity 0.5s;
+        /* 少しセピア調にして雰囲気を統一（好みで外してください） */
+        filter: sepia(0.15) contrast(1.05);
+    }
+    
+    .book-meta {
+        margin-top: 15px; text-align: center; font-size: 0.85rem; color: var(--text-sub);
+        transition: color 0.3s; width: 100%;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .book-item.selected .book-meta,
+    .book-item:hover .book-meta { color: var(--accent); }
+
+    /* ========== 3. READER ========== */
+    #view-reader {
+        background: #000;
+        display: flex; justify-content: center; align-items: center;
+        perspective: 3000px;
+    }
+
+    .book-stage {
+        position: relative;
+        width: calc(var(--page-width) * 2);
+        height: var(--book-height);
+        transform-style: preserve-3d;
+        transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    @media (max-width: 800px) {
+        :root { --book-height: 60vh; }
+        .book-stage { width: 90vw; height: calc(90vw * 1.414); }
+    }
+
+    .sheet {
+        position: absolute; top: 0; right: 0; width: 50%; height: 100%;
+        transform-style: preserve-3d; transform-origin: left center;
+        transition: transform 0.7s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    @media (max-width: 800px) { .sheet { width: 100%; } }
+
+    .page-side {
+        position: absolute; inset: 0;
+        backface-visibility: hidden;
+        background-color: #fcfcfc;
+        overflow: hidden;
+    }
+    .back { transform: rotateY(180deg); }
+    .sheet.flipped { transform: rotateY(-180deg); }
+
+    canvas.page-canvas {
+        width: 100%; height: 100%;
+        object-fit: contain;
+        /* よりくっきり見せる */
+        filter: contrast(105%) brightness(102%);
+        display: block;
+    }
+
+    /* ========== UI (AUTO HIDE) ========== */
+    .reader-ui-layer {
+        position: fixed; inset: 0; z-index: 100;
+        display: flex; flex-direction: column; justify-content: space-between;
+        padding: 30px;
+        pointer-events: none; opacity: 0; transition: opacity 0.6s ease;
+    }
+    .reader-ui-layer.visible { opacity: 1; }
+    .reader-ui-layer.visible .ui-elem { pointer-events: auto; }
+
+    .ui-top { text-align: center; }
+    .ui-bottom { display: flex; justify-content: center; gap: 30px; }
+    .info-text { font-size: 0.9rem; letter-spacing: 0.1em; color: rgba(255,255,255,0.7); text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+
+    .icon-btn {
+        width: 50px; height: 50px; border-radius: 50%;
+        background: rgba(20,20,20,0.6); border: 1px solid rgba(255,255,255,0.15);
+        color: #fff; display: flex; justify-content: center; align-items: center;
+        cursor: pointer; transition: 0.3s; backdrop-filter: blur(5px);
+    }
+    .icon-btn:hover {
+        background: var(--accent); color: #000; transform: scale(1.1);
+        box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .icon-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+    /* ========== GUARDIAN ========== */
+    #guardian-overlay {
+        position: fixed; bottom: 40px; right: 40px; z-index: 2000;
+        pointer-events: none; display: flex; align-items: center; gap: 15px;
+        opacity: 0; transition: opacity 0.5s;
+    }
+    .guardian-light {
+        width: 6px; height: 6px; background: var(--accent); border-radius: 50%;
+        box-shadow: 0 0 15px var(--accent); animation: pulse 3s infinite;
+    }
+    @keyframes pulse { 0%, 100% {opacity: 1;} 50% { opacity: 0.3; } }
+    .guardian-text {
+        font-size: 0.85rem; color: var(--accent); letter-spacing: 0.08em;
+        text-shadow: 0 2px 10px rgba(0,0,0,0.9); font-family: sans-serif;
+        background: rgba(0,0,0,0.6); padding: 5px 12px;
+        border-radius: 4px; border-left: 1px solid var(--accent-dim);
+    }
+
+    /* ========== MODAL ========== */
+    .modal-backdrop {
+        position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.85);
+        backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center;
+        opacity: 0; pointer-events: none; transition: opacity 0.4s;
+    }
+    .modal-backdrop.open { opacity: 1; pointer-events: auto; }
+    .modal-content {
+        width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto;
+        background: #14110f; border: 1px solid var(--text-legal);
+        box-shadow: 0 20px 50px rgba(0,0,0,0.8); padding: 40px;
+        color: var(--text-main); transform: translateY(20px); transition: transform 0.4s;
+    }
+    .modal-backdrop.open .modal-content { transform: translateY(0); }
+    .modal-section { margin-bottom: 40px; display: none; }
+    .modal-section.active { display: block; animation: fadeIn 0.5s; }
+    @keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
+    .close-modal {
+        position: absolute; top: 20px; right: 20px;
+        color: var(--text-sub); cursor: pointer; font-size: 1.5rem; transition: color 0.3s;
+    }
+    .close-modal:hover { color: var(--accent); }
+    .modal-text { font-size: 0.85rem; line-height: 1.8; color: #b0a8a0; text-align: justify; }
+    .modal-text p { margin-bottom: 1rem; }
+
+</style>
+</head>
+<body>
+
+<div class="ambient-bg"></div>
+
+<div id="guardian-overlay">
+    <div class="guardian-light"></div>
+    <div class="guardian-text" id="guardian-msg">準備しています...</div>
+</div>
+
+<!-- 1. ENTRY -->
+<div id="view-entry" class="fade-layer active">
+    <div class="entry-content">
+        <div class="app-title">THE ARCHIVE</div>
+        <div class="librarian-msg">
+            ようこそ。よくぞ参られました。<br>
+            ここは外の喧騒が届かない、あなただけの「静寂の書庫」です。<br><br>
+            照明を落とし、文字を読みやすく整えてお待ちしておりました。<br>
+            どうぞ、安らぎの中でページをめくるひとときを。
+        </div>
+        <label class="btn-quiet" id="btn-open-shelf">
+            書庫へ入る
+            <input type="file" id="folder-input" webkitdirectory directory multiple style="display:none">
+        </label>
+        <div class="sub-links">
+            <button class="text-link" onclick="openModal('overview')">書庫の概要</button>
+            <button class="text-link" onclick="openModal('legal')">規約と免責</button>
+        </div>
+    </div>
+</div>
+
+<!-- 2. SHELF -->
+<div id="view-shelf" class="fade-layer">
+    <div class="shelf-grid" id="shelf-grid"></div>
+</div>
+
+<!-- 3. READER -->
+<div id="view-reader" class="fade-layer">
+    <div class="book-stage">
+        <div id="book-model" style="width:100%; height:100%; position:relative; transform-style:preserve-3d;"></div>
+    </div>
+    <div class="reader-ui-layer" id="reader-ui">
+        <div class="ui-top ui-elem">
+            <div class="info-text" id="book-title-disp">Untitled</div>
+        </div>
+        <div class="ui-bottom ui-elem">
+            <div class="icon-btn" id="btn-close" title="本棚に戻る">
+                <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+            </div>
+            <div class="icon-btn" style="width:auto; padding:0 20px; border-radius:30px; font-size:0.8rem;" id="page-counter">
+                1 / 1
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-backdrop" id="info-modal">
+    <div class="modal-content">
+        <div class="close-modal" onclick="closeModal()">×</div>
+        <div id="sec-overview" class="modal-section">
+            <div class="modal-title" style="font-size:1.2rem; color:var(--accent); margin-bottom:20px; border-bottom:1px solid var(--text-sub);">書庫の概要</div>
+            <div class="modal-text">
+                <p>「The Sanctuary Archive」は、読書体験そのものに没入するために設計された電子書庫ツールです。</p>
+                <p>余計な機能は排除し、暖炉のような微かな灯りと、紙の手触りを感じさせるページめくりだけを用意しました。</p>
+            </div>
+        </div>
+        <div id="sec-legal" class="modal-section">
+            <div class="modal-title" style="font-size:1.2rem; color:var(--accent); margin-bottom:20px; border-bottom:1px solid var(--text-sub);">規約と免責</div>
+            <div class="modal-text">
+                <p><strong>1. データの取り扱い</strong><br>本ツールはブラウザ内（ローカル環境）でのみ動作し、外部へファイルを送信することはありません。</p>
+                <p><strong>2. 免責事項</strong><br>本ツールの使用によって生じたいかなる不具合についても責任を負いません。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    /* ========== SYSTEM ========== */
+    const guardian = {
+        el: document.getElementById('guardian-overlay'),
+        text: document.getElementById('guardian-msg'),
+        timer: null,
+        speak(msg, duration = 3000) {
+            this.text.innerText = msg;
+            this.el.style.opacity = 1;
+            clearTimeout(this.timer);
+            if(duration > 0) {
+                this.timer = setTimeout(() => { this.el.style.opacity = 0; }, duration);
+            }
+        },
+        stay(msg) { this.speak(msg, 0); },
+        hush() { this.el.style.opacity = 0; }
+    };
+
+    const state = {
+        files: [], pdf: null, sheets: [], curIndex: 0, isManga: true, uiTimer: null,
+        shelfIndex: -1, view: 'entry'
+    };
+
+    const ui = {
+        entry: document.getElementById('view-entry'),
+        shelf: document.getElementById('view-shelf'),
+        reader: document.getElementById('view-reader'),
+        grid: document.getElementById('shelf-grid'),
+        book: document.getElementById('book-model'),
+        uiLayer: document.getElementById('reader-ui'),
+        title: document.getElementById('book-title-disp'),
+        counter: document.getElementById('page-counter'),
+        modal: document.getElementById('info-modal'),
+        secOverview: document.getElementById('sec-overview'),
+        secLegal: document.getElementById('sec-legal')
+    };
+
+    /* ========== INIT ========== */
+    document.getElementById('folder-input').addEventListener('change', loadShelf);
+    document.getElementById('btn-close').onclick = closeBook;
+    
+    document.getElementById('btn-open-shelf').addEventListener('mouseenter', () => {
+        if(state.view === 'entry') guardian.speak("ご自身のフォルダを選択してください。", 2000);
+    });
+
+    document.addEventListener('keydown', e => {
+        if(ui.modal.classList.contains('open')) {
+            if(e.key === 'Escape') closeModal(); return;
+        }
+        if (e.code === 'ControlRight') {
+            if (state.view === 'reader') closeBook(); return;
+        }
+        if (state.view === 'shelf') { handleShelfKey(e); return; }
+        if (state.view === 'reader' && state.pdf) {
+            if(e.key === 'Escape') closeBook();
+            if(e.key === 'ArrowRight') turnPage(1); 
+            if(e.key === 'ArrowLeft') turnPage(-1);
+            wakeUI();
+        }
+    });
+
+    window.addEventListener('mousemove', wakeUI);
+    window.addEventListener('touchstart', wakeUI, {passive: true});
+    window.addEventListener('click', e => {
+        if(state.view !== 'reader' || !state.pdf) return;
+        if(e.target.closest('.ui-elem')) return;
+        const width = window.innerWidth;
+        if(e.clientX > width / 2) turnPage(1); else turnPage(-1); 
+    });
+
+    function openModal(type) {
+        ui.secOverview.classList.remove('active');
+        ui.secLegal.classList.remove('active');
+        if(type === 'overview') {
+            ui.secOverview.classList.add('active'); guardian.speak("この書庫についてご説明します。", 0);
+        } else {
+            ui.secLegal.classList.add('active'); guardian.speak("大切な取り決めごとは、こちらに。", 0);
+        }
+        ui.modal.classList.add('open');
+    }
+    function closeModal() { ui.modal.classList.remove('open'); guardian.hush(); }
+    ui.modal.addEventListener('click', (e) => { if(e.target === ui.modal) closeModal(); });
+
+
+    /* ========== SHELF LOGIC ========== */
+    async function loadShelf(e) {
+        const files = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+        if(files.length === 0) {
+            guardian.speak("PDFが見当たらないようです...", 3000); return;
+        }
+        const collator = new Intl.Collator(undefined, {numeric: true, sensitivity: 'base'});
+        files.sort((a, b) => collator.compare(a.name, b.name));
+        state.files = files;
+        state.shelfIndex = -1;
+
+        changeView('shelf');
+        guardian.speak(`蔵書を整理しております... (${files.length}冊)`, 2000);
+        
+        ui.grid.innerHTML = "";
+        for(let i=0; i<files.length; i++) {
+            const file = files[i];
+            const item = document.createElement('div');
+            item.className = 'book-item';
+            
+            const spine = document.createElement('div');
+            spine.className = 'book-spine';
+            const img = document.createElement('img');
+            spine.appendChild(img);
+            
+            const meta = document.createElement('div');
+            meta.className = 'book-meta';
+            meta.innerText = file.name.replace('.pdf','');
+            
+            item.appendChild(spine);
+            item.appendChild(meta);
+            
+            item.onclick = () => {
+                state.shelfIndex = i;
+                updateShelfSelection();
+                openBook(file);
+            };
+
+            ui.grid.appendChild(item);
+            createThumb(file, img); // 高画質化対応
+            await sleep(50);
+        }
+        setTimeout(() => guardian.speak("整理が終わりました。矢印キーで本をお選びください。", 4000), 1000);
+    }
+
+    // ★改善されたキー操作（列数を動的に判定）
+    function handleShelfKey(e) {
+        if(state.files.length === 0) return;
+        const items = Array.from(document.querySelectorAll('.book-item'));
+        if(items.length === 0) return;
+
+        // 現在の列数（cols）を動的に計算する
+        // 最初の要素と同じY座標にある要素の数を数える
+        let cols = 1;
+        const firstOffset = items[0].offsetTop;
+        while(cols < items.length && items[cols].offsetTop === firstOffset) {
+            cols++;
+        }
+
+        let nextIndex = state.shelfIndex;
+
+        if (e.key === 'ArrowRight') nextIndex++;
+        else if (e.key === 'ArrowLeft') nextIndex--;
+        else if (e.key === 'ArrowDown') nextIndex += cols;
+        else if (e.key === 'ArrowUp') nextIndex -= cols;
+        else if (e.key === 'Enter') {
+            if(state.shelfIndex >= 0 && state.shelfIndex < state.files.length) {
+                openBook(state.files[state.shelfIndex]);
+            }
+            return;
+        } else return;
+
+        // 範囲制限
+        if (nextIndex < 0) nextIndex = 0;
+        if (nextIndex >= state.files.length) nextIndex = state.files.length - 1;
+
+        if (nextIndex !== state.shelfIndex) {
+            state.shelfIndex = nextIndex;
+            updateShelfSelection();
+            if(Math.random() > 0.8) guardian.speak("良い一冊ですね。", 1500);
+        }
+    }
+
+    function updateShelfSelection() {
+        const items = document.querySelectorAll('.book-item');
+        items.forEach((item, idx) => {
+            if(idx === state.shelfIndex) {
+                item.classList.add('selected');
+                // スクロール位置の微調整
+                item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                item.classList.remove('selected');
+            }
+        });
+    }
+
+    // ★サムネイル高画質化
+    async function createThumb(file, img) {
+        try {
+            const buf = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(buf).promise;
+            const page = await pdf.getPage(1);
+            // サムネイル解像度アップ (0.4 -> 1.5)
+            const vp = page.getViewport({scale: 1.5});
+            
+            const cvs = document.createElement('canvas');
+            cvs.width = vp.width; cvs.height = vp.height;
+            
+            await page.render({canvasContext: cvs.getContext('2d'), viewport: vp}).promise;
+            img.src = cvs.toDataURL();
+            img.style.opacity = 1;
+            pdf.destroy();
+        } catch(e) {}
+    }
+
+    /* ========== READER LOGIC ========== */
+    function wakeUI() {
+        if(state.view !== 'reader') return;
+        ui.uiLayer.classList.add('visible');
+        ui.reader.style.cursor = 'auto';
+        clearTimeout(state.uiTimer);
+        state.uiTimer = setTimeout(() => {
+            ui.uiLayer.classList.remove('visible');
+            ui.reader.style.cursor = 'none'; 
+        }, 2500);
+    }
+
+    async function openBook(file) {
+        changeView('reader');
+        guardian.stay("紐解いております...");
+        ui.title.innerText = file.name.replace('.pdf','');
+        
+        try {
+            const buf = await file.arrayBuffer();
+            state.pdf = await pdfjsLib.getDocument(buf).promise;
+            buildDom(state.pdf.numPages);
+            state.curIndex = 0;
+            updateView();
+            guardian.speak("どうぞ、ごゆっくり。", 4000);
+            wakeUI();
+        } catch(e) {
+            console.error(e);
+            guardian.speak("申し訳ありません。この本は開けませんでした。", 4000);
+            setTimeout(closeBook, 2000);
+        }
+    }
+
+    function closeBook() {
+        if(state.pdf) { state.pdf.destroy(); state.pdf = null; }
+        ui.book.innerHTML = ""; state.sheets = [];
+        changeView('shelf');
+        ui.reader.style.cursor = 'default';
+        guardian.speak("本を閉じ、棚へお戻しします。");
+        setTimeout(updateShelfSelection, 100);
+    }
+
+    function buildDom(numPages) {
+        ui.book.innerHTML = ""; state.sheets = [];
+        const spreadCount = Math.ceil((numPages + 1) / 2);
+        for(let i=0; i<spreadCount; i++) {
+            const sheet = document.createElement('div');
+            sheet.className = 'sheet';
+            sheet.style.zIndex = spreadCount - i + 50;
+            const pFront = i * 2 + 1; 
+            const pBack = i * 2 + 2;
+            sheet.innerHTML = `<div class="page-side front" id="pg-${pFront}"></div><div class="page-side back" id="pg-${pBack}"></div>`;
+            ui.book.appendChild(sheet);
+            state.sheets.push({ el: sheet, pFront, pBack, loaded: false });
+        }
+    }
+
+    function turnPage(dir) {
+        let goNext = false;
+        if(state.isManga) { if(dir < 0) goNext = true; } 
+        else { if(dir > 0) goNext = true; }
+
+        if(goNext) {
+            if(state.curIndex >= state.sheets.length) return;
+            state.sheets[state.curIndex].el.classList.add('flipped');
+            state.curIndex++;
+        } else {
+            if(state.curIndex <= 0) return;
+            state.curIndex--;
+            state.sheets[state.curIndex].el.classList.remove('flipped');
+        }
+        
+        const total = state.sheets.length;
+        state.sheets.forEach((sheet, idx) => {
+            if (idx < state.curIndex) {
+                sheet.el.style.zIndex = 1000 + idx; 
+                if(!sheet.el.classList.contains('flipped')) sheet.el.classList.add('flipped');
+            } else {
+                sheet.el.style.zIndex = total - idx + 50;
+                if(sheet.el.classList.contains('flipped')) sheet.el.classList.remove('flipped');
+            }
+        });
+        updateView();
+    }
+
+    function updateView() {
+        ui.counter.innerText = `${state.curIndex} / ${state.sheets.length}`;
+        [state.curIndex, state.curIndex-1, state.curIndex+1].forEach(i => {
+            if(state.sheets[i]) renderSheet(state.sheets[i]);
+        });
+    }
+
+    // ★リーダー描画の高画質化
+    async function renderSheet(sheetObj) {
+        if(sheetObj.loaded) return;
+        
+        const renderPage = async (pNum, containerId) => {
+            if(pNum > state.pdf.numPages) return;
+            const container = document.getElementById(containerId);
+            if(!container) return;
+            try {
+                const page = await state.pdf.getPage(pNum);
+                const dpr = window.devicePixelRatio || 1;
+                // 表示領域の幅を取得
+                const rect = ui.book.getBoundingClientRect();
+                const targetW = (rect.width / 2); 
+                
+                const unscaled = page.getViewport({scale: 1});
+                let scale = (targetW / unscaled.width);
+                // 高解像度ディスプレイ向けにスケール補正 (x2.5)
+                scale = scale * dpr * 2.5; 
+
+                const viewport = page.getViewport({scale: scale});
+                const cvs = document.createElement('canvas');
+                cvs.className = 'page-canvas';
+                cvs.width = viewport.width;
+                cvs.height = viewport.height;
+                
+                const ctx = cvs.getContext('2d');
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+
+                await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+                container.innerHTML = ""; container.appendChild(cvs);
+            } catch(e) {}
+        };
+        await Promise.all([
+            renderPage(sheetObj.pFront, `pg-${sheetObj.pFront}`),
+            renderPage(sheetObj.pBack, `pg-${sheetObj.pBack}`)
+        ]);
+        sheetObj.loaded = true;
+    }
+
+    function changeView(viewName) {
+        state.view = viewName;
+        [ui.entry, ui.shelf, ui.reader].forEach(el => {
+            el.classList.remove('active'); el.classList.add('inactive');
+        });
+        if(viewName === 'entry') transitionTo(ui.entry);
+        if(viewName === 'shelf') transitionTo(ui.shelf);
+        if(viewName === 'reader') transitionTo(ui.reader);
+    }
+    function transitionTo(el) { el.classList.remove('inactive'); el.classList.add('active'); }
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+</script>
+</body>
+</html>
